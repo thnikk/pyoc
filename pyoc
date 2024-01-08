@@ -1,0 +1,97 @@
+#!/usr/bin/python3 -u
+"""
+A wrapper for amdgpu's hwmon interface to simplify overclocking.
+To understand commands for your specific card, read this:
+https://dri.freedesktop.org/docs/drm/gpu/amdgpu.html#pp-od-clk-voltage
+Author: thnikk
+"""
+import glob
+import argparse
+import json
+import os
+import sys
+
+parser = argparse.ArgumentParser(
+    description="Overclock specified GPU with profile")
+parser.add_argument('device', action='store', type=str, help='Profile to load')
+args = parser.parse_args()
+
+default_profiles = {
+    "1002:73bf": ["s 1 2400", "m 1 1050", "vo -100", "c"],
+    "1002:731f": ["vc 2 1800 1000", "s 1 1800", "c"],
+}
+
+
+def load_config(path, default):
+    """ Load or create json config with default """
+    config_path = os.path.expanduser(path)
+    if os.path.exists(config_path):
+        print("Config found in", config_path)
+        with open(config_path, 'r', encoding='utf-8') as config_file:
+            config = json.load(config_file)
+            return config
+    else:
+        print("Config not found, creating in", config_path)
+        with open(config_path, "w", encoding='utf-8') as config_file:
+            json.dump(default, config_file, indent=4)
+        print("Default config created. Please edit "
+              f"{config_path} before running again.")
+        sys.exit(1)
+
+
+def find_gpu(vid_pid):
+    """ Get path for GPU for a given vendor and product id """
+    for path in glob.glob('/sys/class/hwmon/*'):
+        try:
+            with open(
+              f"{path}/device/vendor", encoding='utf-8') as vendor_file:
+                vid = vendor_file.read().strip().lstrip("0x")
+            with open(
+              f"{path}/device/device", encoding='utf-8') as product_file:
+                pid = product_file.read().strip().lstrip("0x")
+            if vid == vid_pid.split(":")[0] and pid == vid_pid.split(":")[1]:
+                return path
+        except FileNotFoundError:
+            pass
+    return None
+
+
+def set_oc(device, commands):
+    """ Set OC for device """
+    path = find_gpu(device)
+    print(f"Applying overclock for {device}.")
+    if path:
+        # Enable custom profile (maybe only necessary for pre-navi cards)
+        with open(
+            f"{path}/device/power_dpm_force_performance_level",
+            'w', encoding='utf-8'
+        ) as file:
+            file.write("manual")
+        # Remove power limit
+        with open(
+            f"{path}/power1_cap_max", 'r', encoding='utf-8'
+        ) as file:
+            power_max = file.read().strip()
+        with open(
+            f"{path}/power1_cap", 'w', encoding='utf-8'
+        ) as file:
+            file.write(power_max)
+        # Write commands
+        for command in commands:
+            with open(
+                f"{path}/device/pp_od_clk_voltage", 'w', encoding='utf-8'
+            ) as file:
+                file.write(command)
+        # Print file
+        with open(
+            f"{path}/device/pp_od_clk_voltage", 'r', encoding='utf-8'
+        ) as file:
+            print(file.read())
+
+
+# Load config
+profiles = load_config("/etc/pyoc.json", default_profiles)
+
+# Load file for argument
+if args.device in list(profiles):
+    set_oc(args.device, profiles[args.device])

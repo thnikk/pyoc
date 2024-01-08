@@ -1,0 +1,1 @@
+ATTR{vendor}=="0xVENDOR", ATTR{device}=="0xPRODUCT", SUBSYSTEM=="pci", DRIVERS=="amdgpu", ACTION=="bind", RUN+="/usr/local/bin/pyoc 'VENDOR:PRODUCT"
